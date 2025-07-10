@@ -86,6 +86,9 @@ namespace knobkraft {
 		// Allow to override the default algorithm to determine how to query a bank
 		virtual midikraft::BankDownloadMethod bankDownloadMethod() const override;
 
+		// Add this method to allow UI/backend to query if the adaptation supports separate DeviceID and MIDI Channel
+		bool supportsSeparateDeviceIdAndChannel() const;
+
 		// The following functions are implemented generically and current cannot be defined in Python
 		std::shared_ptr<midikraft::DataFile> patchFromPatchData(const Synth::PatchData &data, MidiProgramNumber place) const override;
 		bool isOwnSysex(MidiMessage const &message) const override;

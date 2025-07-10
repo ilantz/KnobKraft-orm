@@ -78,7 +78,8 @@ namespace knobkraft {
 		* kFriendlyProgramName = "friendlyProgramName",
 		* kSetupHelp = "setupHelp",
 		* kGetStoredTags = "storedTags",
-		* kIndicateBankDownloadMethod= "bankDownloadMethodOverride";
+		* kIndicateBankDownloadMethod= "bankDownloadMethodOverride",
+		* kSupportsSeparateDeviceIdAndChannel = "supportsSeparateDeviceIdAndChannel";
 
 	std::vector<const char*> kAdaptationPythonFunctionNames = {
 		kName,
@@ -115,7 +116,8 @@ namespace knobkraft {
 		kFriendlyBankName,
 		kFriendlyProgramName,
 		kSetupHelp,
-		kGetStoredTags
+		kGetStoredTags,
+		kSupportsSeparateDeviceIdAndChannel
 	};
 
 	std::vector<const char*> kMinimalRequiredFunctionNames = {
@@ -1023,5 +1025,24 @@ namespace knobkraft {
 		juce::MD5 md5hash(patchData.data(), patchData.size());
 		std::string hash = md5hash.toHexString().toStdString();
 		fingerprintCache_[hash] = inFingerprint;
+	}
+
+	bool GenericAdaptation::supportsSeparateDeviceIdAndChannel() const {
+		py::gil_scoped_acquire acquire;
+		if (!pythonModuleHasFunction(kSupportsSeparateDeviceIdAndChannel)) {
+			return false;
+		}
+		try {
+			py::object result = callMethod(kSupportsSeparateDeviceIdAndChannel);
+			bool supports = result.cast<bool>();
+			return supports;
+		} catch (py::error_already_set& ex) {
+			spdlog::error("GenericAdaptation: Exception when calling '{}': {}", kSupportsSeparateDeviceIdAndChannel, ex.what());
+			ex.restore();
+			return false;
+		} catch (std::exception& ex) {
+			spdlog::error("GenericAdaptation: Exception when calling '{}': {}", kSupportsSeparateDeviceIdAndChannel, ex.what());
+			return false;
+		}
 	}
 }

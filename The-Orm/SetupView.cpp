@@ -17,7 +17,6 @@
 #include "AutoDetectProgressWindow.h"
 #include "LoopDetection.h"
 
-
 #include "UIModel.h"
 
 #include "ColourHelpers.h"
@@ -128,10 +127,35 @@ void SetupView::rebuildSetupColumn() {
 	for (auto &synth: sortedSynthList_) {
 		if (!UIModel::instance()->synthList_.isSynthActive(synth.device())) continue;
 		auto sectionName = synth.getName();
+		
 		// For each synth, we need 3 properties, and we need to listen to changes: 
 		properties_.push_back(std::make_shared<MidiChannelPropertyEditorWithOldDevices>("Sent to device", sectionName, false));
 		properties_.push_back(std::make_shared<MidiChannelPropertyEditorWithOldDevices>("Receive from device", sectionName, true));
-		properties_.push_back(std::make_shared<MidiChannelPropertyEditor>("MIDI channel", sectionName));
+		
+		// Check if this synth supports separate device ID and channel
+		// Try both SimpleDiscoverableDevice and GenericAdaptation
+		auto simpleDevice = std::dynamic_pointer_cast<midikraft::SimpleDiscoverableDevice>(synth.device());
+		auto genericAdaptation = std::dynamic_pointer_cast<knobkraft::GenericAdaptation>(synth.device());
+		
+		bool supportsSeparate = false;
+		if (simpleDevice) {
+			supportsSeparate = simpleDevice->supportsSeparateDeviceIdAndChannel();
+		}
+		if (genericAdaptation) {
+			supportsSeparate = genericAdaptation->supportsSeparateDeviceIdAndChannel();
+		}
+		
+		if (supportsSeparate) {
+			// Add checkbox for separate device ID and channel
+			properties_.push_back(std::make_shared<TypedNamedValue>("Separate Device ID and MIDI Channel", sectionName, false));
+			// Add Device ID (Sysex) property (renamed from MIDI Channel)
+			properties_.push_back(std::make_shared<MidiChannelPropertyEditor>("Device ID (Sysex)", sectionName));
+			// Add MIDI Channel (non-Sysex) property
+			properties_.push_back(std::make_shared<MidiChannelPropertyEditor>("MIDI Channel (non-Sysex)", sectionName));
+		} else {
+			// Standard MIDI Channel property
+			properties_.push_back(std::make_shared<MidiChannelPropertyEditor>("MIDI channel", sectionName));
+		}
 	}
 	// We need to know if any of these are clicked
 	for (auto prop : properties_) prop->value().addListener(this);
@@ -164,14 +188,72 @@ void SetupView::refreshData() {
 		prop++;
 		setValueWithoutListeners(properties_[prop]->value(), properties_[prop]->findOrAppendLookup(synth.device()->midiInput().name.toStdString()));
 		prop++;
-		if (!synth.device()->channel().isValid()) {
-			setValueWithoutListeners(properties_[prop++]->value(), 18);
+		
+		// Check if this synth supports separate device ID and channel
+		auto simpleDevice = std::dynamic_pointer_cast<midikraft::SimpleDiscoverableDevice>(synth.device());
+		auto genericAdaptation = std::dynamic_pointer_cast<knobkraft::GenericAdaptation>(synth.device());
+		
+		bool supportsSeparate = false;
+		if (simpleDevice) {
+			supportsSeparate = simpleDevice->supportsSeparateDeviceIdAndChannel();
 		}
-		else if (synth.device()->channel().isOmni()) {
-			setValueWithoutListeners(properties_[prop++]->value(), 17);
+		if (genericAdaptation) {
+			supportsSeparate = genericAdaptation->supportsSeparateDeviceIdAndChannel();
 		}
-		else {
-			setValueWithoutListeners(properties_[prop++]->value(), synth.device()->channel().toOneBasedInt());
+		
+		if (supportsSeparate) {
+			// Set separate device ID and channel checkbox
+			setValueWithoutListeners(properties_[prop++]->value(), simpleDevice ? simpleDevice->supportsSeparateDeviceIdAndChannel() : false);
+			
+			// Set Device ID (Sysex) - this is the original channel
+			if (!synth.device()->channel().isValid()) {
+				setValueWithoutListeners(properties_[prop++]->value(), 18);
+			}
+			else if (synth.device()->channel().isOmni()) {
+				setValueWithoutListeners(properties_[prop++]->value(), 17);
+			}
+			else {
+				setValueWithoutListeners(properties_[prop++]->value(), synth.device()->channel().toOneBasedInt());
+			}
+			
+			// Set MIDI Channel (non-Sysex) - this is the separate channel
+			MidiChannel separateChannel = MidiChannel::invalidChannel();
+			if (simpleDevice) {
+				separateChannel = simpleDevice->separateMidiChannel();
+			}
+			if (genericAdaptation) {
+				// For GenericAdaptation, we need to get the separate channel from settings
+				// since it doesn't have the separateMidiChannel() method
+				std::string separateChannelString = Settings::instance().get(
+					fmt::format("{}-separateMidiChannel", synth.getName()));
+				if (!separateChannelString.empty()) {
+					int separateChannelInt = std::atoi(separateChannelString.c_str());
+					if (separateChannelInt >= 0 && separateChannelInt < 16) {
+						separateChannel = MidiChannel::fromZeroBase(separateChannelInt);
+					}
+				}
+			}
+			
+			if (!separateChannel.isValid()) {
+				setValueWithoutListeners(properties_[prop++]->value(), 1); // Default to channel 1
+			}
+			else if (separateChannel.isOmni()) {
+				setValueWithoutListeners(properties_[prop++]->value(), 17);
+			}
+			else {
+				setValueWithoutListeners(properties_[prop++]->value(), separateChannel.toOneBasedInt());
+			}
+		} else {
+			// Standard MIDI Channel property
+			if (!synth.device()->channel().isValid()) {
+				setValueWithoutListeners(properties_[prop++]->value(), 18);
+			}
+			else if (synth.device()->channel().isOmni()) {
+				setValueWithoutListeners(properties_[prop++]->value(), 17);
+			}
+			else {
+				setValueWithoutListeners(properties_[prop++]->value(), synth.device()->channel().toOneBasedInt());
+			}
 		}
 	}
 }
@@ -199,6 +281,9 @@ void SetupView::valueChanged(Value& value)
 		if (prop->value().refersToSameSourceAs(value)) {
 			auto synthFound = UIModel::instance()->synthList_.synthByName(prop->sectionName().toStdString());
 			if (synthFound.device()) {
+				auto simpleDevice = std::dynamic_pointer_cast<midikraft::SimpleDiscoverableDevice>(synthFound.device());
+				auto genericAdaptation = std::dynamic_pointer_cast<knobkraft::GenericAdaptation>(synthFound.device());
+				
 				if (prop->name() == "Sent to device") {
                     auto outputName = prop->lookup()[value.getValue()];
                     synthFound.device()->setOutput(midikraft::MidiController::instance()->getMidiOutputByName(outputName));
@@ -209,6 +294,33 @@ void SetupView::valueChanged(Value& value)
 				}
 				else if (prop->name() == "MIDI channel") {
 					synthFound.device()->setChannel(MidiChannel::fromOneBase(value.getValue()));
+				}
+				else if (prop->name() == "Separate Device ID and MIDI Channel") {
+					// For GenericAdaptation, we need to persist this setting differently
+					if (genericAdaptation) {
+						// Store the setting in the settings file
+						std::string settingKey = fmt::format("{}-supportsSeparateDeviceIdAndChannel", synthFound.getName());
+						Settings::instance().set(settingKey, value.getValue().operator bool() ? "1" : "0");
+					} else if (simpleDevice) {
+						simpleDevice->setSupportsSeparateDeviceIdAndChannel(value.getValue().operator bool());
+					}
+				}
+				else if (prop->name() == "Device ID (Sysex)") {
+					if (simpleDevice) {
+						simpleDevice->setChannel(MidiChannel::fromOneBase(value.getValue()));
+					}
+					// For GenericAdaptation, this is the same as the regular channel
+					synthFound.device()->setChannel(MidiChannel::fromOneBase(value.getValue()));
+				}
+				else if (prop->name() == "MIDI Channel (non-Sysex)") {
+					if (simpleDevice) {
+						simpleDevice->setSeparateMidiChannel(MidiChannel::fromOneBase(value.getValue()));
+					}
+					// For GenericAdaptation, store this in settings
+					if (genericAdaptation) {
+						std::string settingKey = fmt::format("{}-separateMidiChannel", synthFound.getName());
+						Settings::instance().set(settingKey, std::to_string(value.getValue().operator int() - 1)); // Convert to zero-based
+					}
 				}
 				else if (prop->name() == "Activated") {
 					UIModel::instance()->synthList_.setSynthActive(synthFound.device().get(), value.getValue());

@@ -3,6 +3,16 @@
 #
 #   Dual licensed: Distributed under Affero GPL license by default, an MIT license is available for purchase
 #
+"""
+KnobKraft Deepmind 12 Adaptation
+
+**IMPORTANT:**
+- In KnobKraft's Setup tab, enable the checkbox:
+  "Specify DeviceID and MIDI Channel"
+- Set 'DeviceID' to match your Deepmind's SysEx DeviceID (usually 0).
+- Set 'MIDI Channel' to match your Deepmind's MIDI channel (1–16).
+- This ensures SysEx and MIDI messages are sent on the correct channels.
+"""
 from typing import List
 
 import testing
@@ -24,7 +34,24 @@ def needsChannelSpecificDetection():
     return False
 
 
+# Function to indicate this synth supports separate device ID and channel
+# Must be a function, not a module-level variable
+def supportsSeparateDeviceIdAndChannel():
+    return True
+
+
+def helpText():
+    return (
+        "This adaptation supports synths where DeviceID and MIDI Channel are separate.\n"
+        "In KnobKraft's Setup tab, enable the checkbox: 'Specify DeviceID and MIDI Channel'.\n"
+        "Set 'DeviceID' to match your Deepmind's SysEx DeviceID (usually 0).\n"
+        "Set 'MIDI Channel' to match your Deepmind's MIDI channel (1–16).\n"
+        "This ensures SysEx and MIDI messages are sent on the correct channels."
+    )
+
+
 def channelIfValidDeviceResponse(message):
+    # Returns the DeviceID (SysEx channel), not the MIDI channel!
     if (len(message) > 8
             and message[0] == 0xf0  # Sysex
             and message[1] == 0x7e  # Non-realtime

@@ -979,6 +979,16 @@ void PatchView::sendProgramChangeMessagesForPatch(std::shared_ptr<midikraft::Mid
 		// Build the MIDI messages required to select bank and program
 	auto selectPatch = buildSelectBankAndProgramMessages(program, patch);
 	if (selectPatch.size() > 0) {
+		// Use the appropriate channel for non-SysEx messages
+		auto simpleDevice = std::dynamic_pointer_cast<midikraft::SimpleDiscoverableDevice>(patch.smartSynth());
+		if (simpleDevice && simpleDevice->supportsSeparateDeviceIdAndChannel() && simpleDevice->separateMidiChannel().isValid()) {
+			for (auto& message : selectPatch) {
+				// For non-SysEx messages, use the separate channel
+				if (!message.isSysEx()) {
+					message.setChannel(simpleDevice->separateMidiChannel().toOneBasedInt());
+				}
+			}
+		}
 		patch.smartSynth()->sendBlockOfMessagesToSynth(midiLocation->midiOutput(), selectPatch);
 	}
 	else {
